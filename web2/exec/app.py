@@ -1,33 +1,41 @@
-from flask import Flask, render_template, request
-import sys
-from io import StringIO
+from flask import Flask, request, jsonify
+import ast
 
 app = Flask(__name__)
 
-@app.route('/')
-def index():
-    return render_template('index.html')
+# Define a safe subset of operations via AST parsing
+SAFE_NODES = {
+    'Expression', 'BinOp', 'Add', 'Sub', 'Mult', 'Div', 'Pow',
+    'Num', 'Load', 'UnaryOp', 'UAdd', 'USub', 'Name'
+}
 
-@app.route('/run', methods=['POST'])
-def submit():
-    data = request.form
-    code = data['code']
-    return render_template('index.html', result=run_code(code))
+class SafeEvaluator(ast.NodeVisitor):
+    def generic_visit(self, node):
+        node_type = type(node).__name__
+        if node_type not in SAFE_NODES:
+            raise ValueError(f"Unsafe expression: {node_type}")
+        super().generic_visit(node)
 
-def run_code(code):
-    # Redirect the output to a string
-    old_stdout = sys.stdout
-    redirected_output = sys.stdout = StringIO()
+    def visit_Name(self, node):
+        if node.id not in ('x', 'y', 'z'):
+            raise ValueError(f"Unknown variable: {node.id}")
+        super().generic_visit(node)
 
+@app.route('/eval', methods=['POST'])
+def evaluate():
+    data = request.get_json() or {}
+    expr = data.get('expr', '')
     try:
-        # shhh
-        exec(code)
-        sys.stdout = old_stdout
+        # Parse expression into AST
+        parsed = ast.parse(expr, mode='eval')
+        # Validate AST nodes
+        SafeEvaluator().visit(parsed)
+        # Compile and evaluate in restricted namespace
+        code = compile(parsed, '<string>', 'eval')
+        result = eval(code, {'__builtins__': {}}, {'x':1,'y':2,'z':3})
+        return jsonify({'result': result})
     except Exception as e:
-        sys.stdout = old_stdout
-        return e
-    
-    return redirected_output.getvalue()
+        return jsonify({'error': str(e)}), 400
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    app.run()
