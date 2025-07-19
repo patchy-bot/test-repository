@@ -1,25 +1,28 @@
-from flask import Flask, render_template, request, jsonify, flash
 import sqlite3
+from flask import Flask, request, jsonify
 
 app = Flask(__name__)
-app.secret_key = b'_5#y2L"F4Q8z\n\xec]/'
+DB_PATH = 'app.db'
 
-@app.route('/')
-def index():
-    return render_template('index.html')
-
-@app.route('/login_username', methods=['POST'])
+@app.route('/login', methods=['POST'])
 def login():
-    username = request.form['username']
-    conn = sqlite3.connect('users.db')
-    c = conn.cursor()
-    user_info = c.execute(f"SELECT username FROM users WHERE username='{username}'").fetchall()
-    if not user_info:
-        flash('Who are you?', 'error')
-    else:
-        flash(f'Welcome back, {user_info}', 'success')
-    return render_template('index.html')
-    
+    data = request.get_json() or {}
+    username = data.get('username', '')
+    password = data.get('password', '')
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    # Parameterized query to fetch stored hash
+    cur.execute('SELECT id, password_hash FROM users WHERE username = ?', (username,))
+    row = cur.fetchone()
+    conn.close()
+    if not row:
+        return jsonify({'error': 'Invalid credentials'}), 401
+    user_id, stored_hash = row
+    # Verify password using bcrypt
+    import bcrypt
+    if bcrypt.checkpw(password.encode('utf-8'), stored_hash):
+        return jsonify({'id': user_id, 'username': username})
+    return jsonify({'error': 'Invalid credentials'}), 401
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    app.run()
