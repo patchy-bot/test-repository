@@ -1,43 +1,43 @@
-import os
-from flask import Flask, request, render_template, redirect
-import requests
-import json
-app = Flask(__name__, static_url_path="/static")
+from flask import Flask, request, jsonify, session
+import subprocess
 
-flag = os.environ.get("FLAG")
-# this is so scuffed .-.
-os.system("apachectl start")
+app = Flask(__name__)
+app.secret_key = 'replace_with_secure_random'
 
-@app.route("/")
-def send_money():
-    response = requests.get("http://localhost:80/gateway.php").content
-    accounts = json.loads(response)
-    return render_template("send-money.html", data=accounts)
+# Dummy authentication decorator
+from functools import wraps
 
-@app.route("/check-balance", methods=["GET"])
-def check():
-    response = requests.get("http://localhost:80/gateway.php").content
-    accounts = json.loads(response)
+def login_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not session.get('user_id'):
+            return jsonify({'error':'Authentication required'}), 401
+        return f(*args, **kwargs)
+    return decorated
 
-    if (accounts["Eatingfood"] < 0):
-        return render_template("check-balance.html", data=accounts, flag=":(")
-    if (accounts["Eatingfood"] >= 100000):
-        return render_template("check-balance.html", data=accounts, flag=flag)
-    return render_template("check-balance.html", data=accounts)
+@app.route('/login', methods=['POST'])
+def login():
+    # Authenticate user (omitting real user store for brevity)
+    session['user_id'] = 1
+    return jsonify({'message':'Logged in'})
 
-@app.route("/send", methods=["POST"])
-def send_data():
-    raw_data = request.get_data()
-    recipient = request.form.get("recipient");
-    amount = request.form.get("amount");
+@app.route('/transfer', methods=['POST'])
+@login_required
+def transfer():
+    data = request.get_json() or {}
+    src = data.get('from_account', '')
+    dst = data.get('to_account', '')
+    amt = data.get('amount', 0)
+    # Validate inputs
+    if not src.isdigit() or not dst.isdigit() or not isinstance(amt, (int, float)):
+        return jsonify({'error':'Invalid parameters'}), 400
+    # Perform transfer logic (placeholder)
+    # subprocess call example (sanitized)
+    cmd = ['bank_transfer', '--from', src, '--to', dst, '--amount', str(amt)]
+    result = subprocess.run(cmd, shell=False, capture_output=True, text=True)
+    if result.returncode != 0:
+        return jsonify({'error': result.stderr}), 500
+    return jsonify({'message':'Transfer successful'})
 
-    if (amount == None or (not amount.isdigit()) or int(amount) < 0 or recipient == None or recipient == "Eatingfood"):
-        return redirect("https://media.tenor.com/UlIwB2YVcGwAAAAC/waah-waa.gif")
-    
-    # Send the data to the Apache PHP server
-    raw_data = b"sender=Eatingfood&" + raw_data;
-    requests.post("http://localhost:80/gateway.php", headers={"content-type": request.headers.get("content-type")}, data=raw_data)
-    return redirect("/check-balance")
-
-if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=5000)
+if __name__ == '__main__':
+    app.run()
